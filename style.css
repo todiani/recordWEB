@@ -1,0 +1,8 @@
+QPushButton {
+    background-color: #fff;
+    border: 1px solid #ccc;
+	padding: 8 5px
+}
+QPushButton:hover {
+    background-color: #e3e3e3; /* 마우스 오버시 조금 어둡게 */
+}
