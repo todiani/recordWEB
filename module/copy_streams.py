@@ -56,6 +56,11 @@ def copy_specific_file(input_path, output_path, deleteAfterPostProcessing, remov
     input_path = os.path.normpath(input_path)
     output_path = os.path.normpath(output_path)
 
+    print(f"[DEBUG] copy_specific_file 함수 시작")
+    print(f"[DEBUG] 입력 파일: {input_path}")
+    print(f"[DEBUG] 출력 파일: {output_path}")
+    print(f"[DEBUG] 설정: deleteAfterPostProcessing={deleteAfterPostProcessing}, removeFixedPrefix={removeFixedPrefix}, minimizePostProcessing={minimizePostProcessing}, config={config}")
+
     if post_processing_method == "스트림복사":
         cmd = [
             ffmpeg_path,

@@ -10,6 +10,13 @@ from datetime import datetime, timedelta
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 
+# path_config 모듈 임포트 시도
+try:
+    from path_config import getFFmpeg, getFFprobe  # FFmpeg 및 FFprobe 경로 가져오는 함수 임포트
+except ImportError:
+    print("[ERROR] path_config.py 파일을 찾을 수 없습니다. 프로그램을 종료합니다.")
+    sys.exit(1)
+
 # 필수 모듈 설치 함수
 def installMissingModules():
     missing_modules = ["PyQt5", "aiohttp"]
@@ -38,9 +45,11 @@ def installMissingModules():
 
 installMissingModules()
 
+
 import aiohttp
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QLineEdit, QFileDialog, QMessageBox, QLabel, QComboBox, QCheckBox
+
 
 class DownloadThread(QThread):
     finished = pyqtSignal()
@@ -59,41 +68,34 @@ class DownloadThread(QThread):
     def run(self):
         downloader = VODDownloader(self.quality, self.savePath)
         try:
-            asyncio.run(downloader.authenticateAndDownload(
-                self.vodNumber,
-                self.savePath,
-                self.quality,
-                self.startTime,
-                self.endTime,
-                self.segmentOption,
-                self.mergeMethod
-            ))
+            asyncio.run(downloader.authenticateAndDownload(self.vodNumber, self.savePath, self.quality, self.startTime, self.endTime, self.segmentOption, self.mergeMethod))
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
 
+
 class VODDownloaderApp(QMainWindow):
-    finished = pyqtSignal() # 추가
     def __init__(self):
         super().__init__()
 
-        BASE_DIR = os.path.dirname(os.path.realpath(__file__))
-        BASE_DIR = os.path.dirname(BASE_DIR)  
-        self.FFMPEG_PATH = os.path.join(BASE_DIR, "dependent", "ffmpeg", "bin", "ffmpeg.exe").replace("\\", "/")
-        self.FFPROBE_PATH = os.path.join(BASE_DIR, "dependent", "ffmpeg", "bin", "ffprobe.exe").replace("\\", "/")
+        # path_config에서 FFmpeg 및 FFprobe 경로 가져오기
+        try:
+            self.FFMPEG_PATH = getFFmpeg()
+            self.FFPROBE_PATH = getFFprobe()  # FFprobe 경로 가져오는 함수 호출
+        except Exception as e:
+            print(f"FFmpeg 또는 FFprobe 경로를 초기화하는 동안 오류가 발생했습니다: {e}")
+            sys.exit(1)
 
         if not os.path.exists(self.FFMPEG_PATH):
             print(f"FFmpeg 경로를 찾을 수 없습니다: {self.FFMPEG_PATH}")
         else:
             print(f"FFmpeg 경로: {self.FFMPEG_PATH}")
+        if not os.path.exists(self.FFPROBE_PATH):
+            print(f"FFprobe 경로를 찾을 수 없습니다: {self.FFPROBE_PATH}")
+        else:
+            print(f"FFprobe 경로: {self.FFPROBE_PATH}")
         self.initUI()
         self.check_gpu_support_and_print()
-
-        # 쿠키 정보를 저장할 멤버 변수 추가
-        self.cookies = {}
-        self.load_cookies()
-        self.session = aiohttp.ClientSession()
-        self.vodEdit.textChanged.connect(self.updateVodInfo)
 
     def initUI(self):
         self.setWindowTitle("VOD 다운로더 v0819")
@@ -119,7 +121,6 @@ class VODDownloaderApp(QMainWindow):
         segmentLabel = QLabel("분할 횟수(180초 초과 영상만 해당):")
         self.segmentCombo = QComboBox()
         self.segmentCombo.addItems(["분할 안함", "4분할", "8분할", "16분할"])
-        self.segmentCombo.setCurrentIndex(3)
         self.layout.addWidget(segmentLabel)
         self.layout.addWidget(self.segmentCombo)
 
@@ -255,84 +256,44 @@ class VODDownloaderApp(QMainWindow):
             self.savePathEdit.setText(directory)
 
     def onDownloadButtonClick(self):
-        vod_number = self.vodEdit.text()
-        save_path = self.savePathEdit.text()
+        vodNumber = self.vodEdit.text()
+        savePath = self.savePathEdit.text()
         quality = self.qualityCombo.currentText()
-        start_time = self.startTimeEdit.text()
-        end_time = self.endTimeEdit.text()
-        segment_option_index = self.segmentCombo.currentIndex()
-        segment_option = [1, 4, 8, 16][segment_option_index]
+        startTime = self.startTimeEdit.text()
+        endTime = self.endTimeEdit.text()
+        segmentOptionIndex = self.segmentCombo.currentIndex()
+        segmentOption = [1, 4, 8, 16][segmentOptionIndex]
 
-        merge_method_index = self.mergeMethodCombo.currentIndex()
+        mergeMethodIndex = self.mergeMethodCombo.currentIndex()
 
-        # GPU 가속 지원 여부 확인
-        if merge_method_index in [2, 3, 4]:
-            if merge_method_index == 2 and not self.check_intel_qsv_support():
-                QMessageBox.warning(self, "경고", "Intel GPU 가속을 사용할 수 없습니다. CPU 인코딩을 사용합니다.")
-                merge_method_index = 1  # CPU 인코딩으로 변경
-            elif merge_method_index == 3 and not self.check_amd_amf_support():
-                QMessageBox.warning(self, "경고", "AMD GPU 가속을 사용할 수 없습니다. CPU 인코딩을 사용합니다.")
-                merge_method_index = 1  # CPU 인코딩으로 변경
-            elif merge_method_index == 4 and not self.check_nvenc_support():
-                QMessageBox.warning(self, "경고", "NVIDIA GPU 가속을 사용할 수 없습니다. CPU 인코딩을 사용합니다.")
-                merge_method_index = 1  # CPU 인코딩으로 변경
+        if mergeMethodIndex in [2, 3, 4]:
+            if mergeMethodIndex == 2 and not self.check_intel_qsv_support():
+                QMessageBox.warning(self, "경고", "Intel GPU 가속을 사용할 수 없습니다. CPU 필터링을 사용합니다.")
+                mergeMethodIndex = 1  # CPU 인코딩으로 변경
+            elif mergeMethodIndex == 3 and not self.check_amd_amf_support():
+                QMessageBox.warning(self, "경고", "AMD GPU 가속을 사용할 수 없습니다. CPU 필터링을 사용합니다.")
+                mergeMethodIndex = 1  # CPU 인코딩으로 변경
+            elif mergeMethodIndex == 4 and not self.check_nvenc_support():
+                QMessageBox.warning(self, "경고", "NVIDIA GPU 가속을 사용할 수 없습니다. CPU 필터링을 사용합니다.")
+                mergeMethodIndex = 1  # CPU 인코딩으로 변경
 
-        merge_method = merge_method_index
+        mergeMethod = mergeMethodIndex
 
-        if vod_number and save_path:
-            # 쿠키 정보를 DownloadThread에 전달
-            self.downloadThread = DownloadThread(vod_number, save_path, quality, start_time, end_time, segment_option, merge_method)
+        if vodNumber and savePath:
+            self.downloadThread = DownloadThread(vodNumber, savePath, quality, startTime, endTime, segmentOption, mergeMethod)
             self.downloadThread.finished.connect(self.onDownloadFinished)
             self.downloadThread.error.connect(self.onDownloadError)
             self.downloadThread.start()
         else:
             QMessageBox.warning(self, "경고", "모든 필드를 채워주세요.")
 
+
     def onDownloadFinished(self):
         QMessageBox.information(self, "다운로드 완료", "VOD 다운로드가 완료되었습니다.")
 
-    def onDownloadError(self, error_message):
-        QMessageBox.critical(self, "다운로드 실패", f"VOD 다운로드 중 오류가 발생했습니다: {error_message}")
+    def onDownloadError(self, errorMessage):
+        QMessageBox.critical(self, "다운로드 실패", f"VOD 다운로드 중 오류가 발생했습니다: {errorMessage}")
 
-    def load_cookies(self):
-        # 쿠키 파일의 경로를 지정합니다.
-        cookie_file_path = os.path.join(os.path.dirname(__file__), '..', 'json', 'cookie.json')
-        try:
-            with open(cookie_file_path, 'r') as f:
-                self.cookies = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"쿠키 파일 로드 중 오류 발생: {e}")
-            self.cookies = {}
-            
-    async def updateVodInfo(self):
-        vod_number = self.vodEdit.text()
-        if not vod_number:
-            return
-
-        downloader = VODDownloader(None, None)
-        try:
-            vod_info = await downloader.getVodInfo(vod_number, self.cookies)
-            if vod_info:
-                live_open_date_str = vod_info.get('content', {}).get('liveOpenDate', 'N/A').split(" ")[0]
-                duration_seconds = vod_info.get('content', {}).get('duration', 0)
-
-                # 시작 시간을 liveOpenDate로 설정
-                self.startTimeEdit.setText(live_open_date_str.replace('-', ':'))
-
-                # 종료 시간을 liveOpenDate + duration으로 설정
-                live_open_datetime = datetime.strptime(live_open_date_str, '%Y-%m-%d')
-                end_datetime = live_open_datetime + timedelta(seconds=duration_seconds)
-                end_time_str = end_datetime.strftime('%Y-%m-%d')
-                self.endTimeEdit.setText(end_time_str.replace('-', ':'))
-            else:
-                QMessageBox.warning(self, "오류", "VOD 정보를 불러올 수 없습니다.")
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"VOD 정보 로드 중 오류 발생: {e}")
-
-    def closeEvent(self, event):
-        self.session.close()
-        self.finished.emit()  # 창이 닫힐 때 finished 시그널 발생
-        event.accept()
 
 class VODDownloader:
     MAX_RETRIES = 3  
@@ -344,19 +305,18 @@ class VODDownloader:
     def __init__(self, quality, savePath):
         BASE_DIR = os.path.dirname(os.path.realpath(__file__))
         BASE_DIR = os.path.dirname(BASE_DIR)  
-        self.FFMPEG_PATH = os.path.join(BASE_DIR, "dependent", "ffmpeg", "bin", "ffmpeg.exe").replace("\\", "/")
-        self.FFPROBE_PATH = os.path.join(BASE_DIR, "dependent", "ffmpeg", "bin", "ffprobe.exe").replace("\\", "/")
-        self.savePath = savePath
-        self.quality = quality
+        self.FFMPEG_PATH = getFFmpeg()  # path_config에서 경로 가져오기
+        self.FFPROBE_PATH = getFFprobe()  # path_config에서 경로 가져오기
         self.COOKIE_PATH = os.path.join(BASE_DIR, "json", "cookie.json").replace("\\", "/")
+        self.savePath = savePath
+        self.quality = quality 
 
 
     def getAuthHeaders(self, cookies):
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Cookie': f'NID_AUT={cookies.get("NID_AUT", "")}; NID_SES={cookies.get("NID_SES", "")}'
         }
-        if cookies:
-            headers['Cookie'] = '; '.join(f'{key}={value}' for key, value in cookies.items())
         return headers
 
     def getSessionCookies(self):
@@ -367,16 +327,7 @@ class VODDownloader:
         with open(self.COOKIE_PATH, 'r') as cookie_file:
             cookies = json.load(cookie_file)
         return cookies
-    
-    async def getVodInfo(self, vod_number, cookies):
-        async with aiohttp.ClientSession(headers=self.getAuthHeaders(cookies)) as session:
-            url = self.CHZZK_VOD_INFO_API.format(videoNo=vod_number)
-            async with session.get(url) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    print(f"VOD 정보 가져오기 실패: {response.status}")
-                    return None
+
 
     async def getFrameRate(self, videoUrl):
         ffprobeCmd = [
@@ -508,6 +459,7 @@ class VODDownloader:
             print(f"VOD 세그먼트 다운로드 중 오류 발생: {e}")
             return None
 
+
     async def mergeSegments(self, segmentFilenames, outputFilename, mergeMethod=0, quality=None):
         video_bitrate = None
         if self.quality == "1080p" or self.quality == "best":
@@ -621,34 +573,17 @@ class VODDownloader:
 
 
     async def authenticateAndDownload(self, vodNumber, savePath, quality="best", startTime=None, endTime=None, segmentOption=1, mergeMethod=0):
-        # 여기에서 쿠키 정보를 가져옵니다.
         sessionCookies = self.getSessionCookies()
 
-        # 쿠키 정보가 없으면 예외를 발생시킵니다.
-        if not sessionCookies:
-            raise Exception("쿠키 정보를 가져오지 못했습니다.")
-
-        # headers를 설정할 때 쿠키 정보를 사용합니다.
-        headers = self.getAuthHeaders(sessionCookies)
-
-        # aiohttp.ClientSession 객체를 생성할 때 headers를 전달합니다.
-        async with aiohttp.ClientSession(headers=headers) as session:
+        if sessionCookies:
             retries = 0
             while retries < self.MAX_RETRIES:
                 try:
-                    print(f"VOD 정보 가져오기 시도: {vodNumber}")
-                    apiUrl = self.CHZZK_VOD_INFO_API.format(videoNo=vodNumber)
-                    async with session.get(apiUrl) as response:
-                        if response.status != 200:
-                            print(f"VOD 정보 가져오기 실패: {response.status} - {response.reason}")
-                            raise Exception(f"VOD 정보를 가져오는데 실패했습니다. 상태 코드: {response.status}, 이유: {response.reason}")
-
-                        try:
+                    headers = self.getAuthHeaders(sessionCookies)
+                    async with aiohttp.ClientSession() as session:
+                        apiUrl = self.CHZZK_VOD_INFO_API.format(videoNo=vodNumber)
+                        async with session.get(apiUrl, headers=headers) as response:
                             vodInfo = await response.json()
-                        except aiohttp.ContentTypeError as e:
-                            print(f"잘못된 컨텐츠 타입으로 JSON 디코딩 실패: {e}")
-                            print(f"응답 텍스트: {await response.text()}")
-                            raise Exception(f"응답을 JSON으로 디코딩하는데 실패했습니다: {e}")
 
                     vodInfoContent = vodInfo.get('content', {})
                     if not vodInfoContent or 'videoId' not in vodInfoContent:
@@ -659,7 +594,7 @@ class VODDownloader:
                     vodInKey = vodInfoContent['inKey']
                     videoTitle = vodInfo['content'].get('videoTitle', 'unknown_title')
                     channelName = vodInfo['content']['channel'].get('channelName', 'unknown_channel')
-                    broadcastDate = vodInfo.get('content', {}).get('liveOpenDate', 'unknown_date').split(" ")[0]
+                    broadcastDate = vodInfo.get('content', {}).get('liveOpenDate', 'unknown_date').split()[0]
 
                     streamLink, videoRepresentationId, resolution = await self.getDashStreamLink(vodId, vodInKey, quality)
                     if not streamLink:
@@ -671,12 +606,8 @@ class VODDownloader:
 
                     print(f"highest_quality: {quality}, frame_rate: {frameRate}")
 
-                    # 임시 파일명을 생성하지 않고 바로 sanitize된 videoTitle을 사용합니다.
-                    temp_savePath = os.path.join(savePath, self.sanitizeFilename(videoTitle)).replace("\\", "/")
-
-                    # 임시 저장 경로 생성
-                    if not os.path.exists(temp_savePath):
-                        os.makedirs(temp_savePath)
+                    randomFilename = self.generateRandomFilename()
+                    temp_savePath = os.path.join(savePath, randomFilename).replace("\\", "/")
 
                     if segmentOption == 1:
                         segmentStart = self.timeToSeconds(startTime) if startTime else 0
@@ -706,132 +637,133 @@ class VODDownloader:
                         else:
                             finalFilename = f"[{broadcastDate}] {self.sanitizeFilename(channelName)} {self.sanitizeFilename(videoTitle)} {quality}{frameRate:.0f}.mp4"
                         finalSavePath = os.path.join(savePath, finalFilename)
-                        try:
-                            await self.mergeSegments([f"{temp_savePath}/part{index}.mp4" for index in range(len(segments))], finalSavePath, mergeMethod, self.quality)
-                        except Exception as e:
-                            print(f"VOD 병합 중 오류 발생: {e}")
-                            raise
-                        finally:
-                          print("VOD 다운로드가 완료되었습니다.")
-                        break
-                        
-                retries += 1
-                print(f"재시도 중 ({retries}/{self.MAX_RETRIES})...")
-                await asyncio.sleep(self.RETRY_INTERVAL)
+                        await self.mergeSegments([f"{temp_savePath}/part{index}.mp4" for index in range(len(segments))], finalSavePath, mergeMethod, self.quality)
 
-                if retries >= self.MAX_RETRIES:
-                    print("재시도 횟수 초과. 다운로드를 중단합니다.")
+                    print("VOD 다운로드가 완료되었습니다.")
                     break
-    else:
-        print("세션 쿠키를 가져오는데 실패했습니다.")
 
-async def getDashStreamLink(self, videoId, inKey, preferredQuality):
-    videoUrl = self.CHZZK_VOD_URI_API.format(videoId=videoId, inKey=inKey)
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(videoUrl, headers={"Accept": "application/dash+xml"}) as response:
-                text = await response.text()
-                root = ET.fromstring(text)
-                ns = {"mpd": "urn:mpeg:dash:schema:mpd:2011"}
+                except Exception as e:
+                    print(f"에러 발생: {e}")
 
-                self.representationElements = root.findall(".//mpd:Representation", namespaces=ns)
-                
-                bestRepresentation = None
-                highestHeight = 0
-                for rep in self.representationElements:
-                    height = rep.get("height")
-                    if height:
-                        if preferredQuality == "best":
-                            if int(height) > highestHeight:
-                                highestHeight = int(height)
-                                bestRepresentation = rep
-                        else:
-                            if int(height) == int(preferredQuality.replace('p', '')):
-                                bestRepresentation = rep
-                                break
+                    retries += 1
+                    print(f"재시도 중 ({retries}/{self.MAX_RETRIES})...")
+                    await asyncio.sleep(self.RETRY_INTERVAL)
 
-                if bestRepresentation is None:
-                    print(f"{preferredQuality}에 맞는 Representation을 찾을 수 없습니다.")
-                    return None, None
-
-                representationId = bestRepresentation.get("id")
-                baseUrl = bestRepresentation.find("mpd:BaseURL", namespaces=ns).text
-
-                # base URL, representation ID 및 높이(해상도) 반환
-                return baseUrl, representationId, highestHeight if preferredQuality == "best" else int(preferredQuality.replace('p', ''))
-
-        except aiohttp.ClientError as e:
-            print("DASHstream XML 로드에 실패했습니다:", str(e))
-            return None, None, None
-        except ET.ParseError as e:
-            print("DASHstream XML 파싱에 실패했습니다:", str(e))
-            return None, None, None
-
-async def getVideoDuration(self, videoUrl):
-    ffprobeCmd = [
-        self.FFPROBE_PATH,
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        videoUrl
-    ]
-
-    try:
-        result = await asyncio.to_thread(subprocess.run, ffprobeCmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        return float(result.stdout.strip())
-    except subprocess.CalledProcessError as e:
-        print(f"비디오 길이 가져오기 중 오류 발생: {e}")
-        return 0
-
-def timeToSeconds(self, timeStr):
-    if not timeStr:
-        return 0
-    h, m, s = map(int, timeStr.split(':'))
-    return h * 3600 + m * 60 + s
-
-def secondsToHhmmss(self, seconds):
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h:02}:{m:02}:{s:06.3f}"
-
-def generateRandomFilename(self):
-    while True:
-        random_name = ''.join(random.choices('0123456789', k=6))
-        save_path = os.path.join(self.savePath, random_name).replace("\\", "/")
-        if not os.path.exists(save_path):
-            return random_name
-
-
-def calculateSegments(self, duration, startTime=None, endTime=None, segmentOption=1):
-    startTimeSeconds = self.timeToSeconds(startTime) if startTime else 0
-    endTimeSeconds = self.timeToSeconds(endTime) if endTime else duration
-
-    if endTimeSeconds - startTimeSeconds > 180:
-        if segmentOption == 1:
-            segmentLength = endTimeSeconds - startTimeSeconds
+                    if retries >= self.MAX_RETRIES:
+                        print("재시도 횟수 초과. 다운로드를 중단합니다.")
+                        break
         else:
-            segmentLength = (endTimeSeconds - startTimeSeconds) / segmentOption
-    else:
-        segmentLength = endTimeSeconds - startTimeSeconds
+            print("세션 쿠키를 가져오는데 실패했습니다.")
 
-    segments = []
-    currentStart = startTimeSeconds
-    while currentStart < endTimeSeconds:
-        currentEnd = min(currentStart + segmentLength, endTimeSeconds)
-        if currentEnd > currentStart:
-            segments.append((currentStart, currentEnd))
-        currentStart = currentEnd
 
-    if segments and (segments[-1][1] - segments[-1][0] < 1):
-        lastSegment = segments.pop()
-        if segments:
-            previousSegment = segments.pop()
-            segments.append((previousSegment[0], lastSegment[1]))
 
-    return segments
+    async def getDashStreamLink(self, videoId, inKey, preferredQuality):
+        videoUrl = self.CHZZK_VOD_URI_API.format(videoId=videoId, inKey=inKey)
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(videoUrl, headers={"Accept": "application/dash+xml"}) as response:
+                    text = await response.text()
+                    root = ET.fromstring(text)
+                    ns = {"mpd": "urn:mpeg:dash:schema:mpd:2011"}
 
-if name == "main":
+                    self.representationElements = root.findall(".//mpd:Representation", namespaces=ns)
+                    
+                    bestRepresentation = None
+                    highestHeight = 0
+                    for rep in self.representationElements:
+                        height = rep.get("height")
+                        if height:
+                            if preferredQuality == "best":
+                                if int(height) > highestHeight:
+                                    highestHeight = int(height)
+                                    bestRepresentation = rep
+                            else:
+                                if int(height) == int(preferredQuality.replace('p', '')):
+                                    bestRepresentation = rep
+                                    break
+
+                    if bestRepresentation is None:
+                        print(f"{preferredQuality}에 맞는 Representation을 찾을 수 없습니다.")
+                        return None, None
+
+                    representationId = bestRepresentation.get("id")
+                    baseUrl = bestRepresentation.find("mpd:BaseURL", namespaces=ns).text
+
+                    # base URL, representation ID 및 높이(해상도) 반환
+                    return baseUrl, representationId, highestHeight if preferredQuality == "best" else int(preferredQuality.replace('p', ''))
+
+            except aiohttp.ClientError as e:
+                print("DASHstream XML 로드에 실패했습니다:", str(e))
+                return None, None, None
+            except ET.ParseError as e:
+                print("DASHstream XML 파싱에 실패했습니다:", str(e))
+                return None, None, None
+
+    async def getVideoDuration(self, videoUrl):
+        ffprobeCmd = [
+            self.FFPROBE_PATH,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            videoUrl
+        ]
+
+        try:
+            result = await asyncio.to_thread(subprocess.run, ffprobeCmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            return float(result.stdout.strip())
+        except subprocess.CalledProcessError as e:
+            print(f"비디오 길이 가져오기 중 오류 발생: {e}")
+            return 0
+
+    def timeToSeconds(self, timeStr):
+        if not timeStr:
+            return 0
+        h, m, s = map(int, timeStr.split(':'))
+        return h * 3600 + m * 60 + s
+
+    def secondsToHhmmss(self, seconds):
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = seconds % 60
+        return f"{h:02}:{m:02}:{s:06.3f}"
+
+    def generateRandomFilename(self):
+        while True:
+            random_name = ''.join(random.choices('0123456789', k=6))
+            save_path = os.path.join(self.savePath, random_name).replace("\\", "/")
+            if not os.path.exists(save_path):
+                return random_name
+
+
+    def calculateSegments(self, duration, startTime=None, endTime=None, segmentOption=1):
+        startTimeSeconds = self.timeToSeconds(startTime) if startTime else 0
+        endTimeSeconds = self.timeToSeconds(endTime) if endTime else duration
+
+        if endTimeSeconds - startTimeSeconds > 180:
+            if segmentOption == 1:
+                segmentLength = endTimeSeconds - startTimeSeconds
+            else:
+                segmentLength = (endTimeSeconds - startTimeSeconds) / segmentOption
+        else:
+            segmentLength = endTimeSeconds - startTimeSeconds
+
+        segments = []
+        currentStart = startTimeSeconds
+        while currentStart < endTimeSeconds:
+            currentEnd = min(currentStart + segmentLength, endTimeSeconds)
+            if currentEnd > currentStart:
+                segments.append((currentStart, currentEnd))
+            currentStart = currentEnd
+
+        if segments and (segments[-1][1] - segments[-1][0] < 1):
+            lastSegment = segments.pop()
+            if segments:
+                previousSegment = segments.pop()
+                segments.append((previousSegment[0], lastSegment[1]))
+
+        return segments
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VODDownloaderApp()
     window.show()

@@ -1,100 +1,72 @@
 import os
 import json
 
-# JSON 파일 경로 설정
-# 현재 스크립트의 위치를 기준으로 json 디렉토리를 설정
-base_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-json_directory = os.path.join(base_directory, 'json')
-channels_path = os.path.join(json_directory, 'channels.json')
-config_path = os.path.join(json_directory, 'config.json')
-
-# json 디렉토리가 존재하지 않으면 생성
-if not os.path.exists(json_directory):
-    os.makedirs(json_directory)
-
-# 채널 정보 로드
 def load_channels():
+    channels_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'json', 'channels.json')
     try:
-        with open(channels_path, "r", encoding="utf-8") as file:
-            channels = json.load(file)
-            
-            for channel in channels:
-                if 'output_dir' in channel:
-                    if not os.path.isabs(channel['output_dir']):
-                        channel['output_dir'] = os.path.abspath(os.path.join(base_directory, channel['output_dir']))
-
-            return channels
+        with open(channels_path, 'r', encoding='utf-8') as f:
+            channels = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        channels = []
+    return channels
 
-# 채널 정보 저장
 def save_channels(channels):
-    for channel in channels:
-        if 'output_dir' in channel:
-            channel['output_dir'] = os.path.abspath(channel['output_dir'])
+    channels_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'json', 'channels.json')
+    try:
+        with open(channels_path, 'w', encoding='utf-8') as f:
+            json.dump(channels, f, indent=4, ensure_ascii=False) # indent=4 추가, ensure_ascii=False 추가
+    except Exception as e:
+        print(f"Error saving channels: {e}")
 
-    with open(channels_path, "w", encoding="utf-8") as file:
-        json.dump(channels, file, indent=2, ensure_ascii=False)
-
-# 기본 설정
-default_config = {
-    "auto_record_mode": False,
-    "autoPostProcessing": False,
-    "recheckInterval": 60,
-    "showMessageBox": True,
-    "deleteAfterPostProcessing": False,
-    "minimizePostProcessing": False,
-    "removeFixedPrefix": False,
-    "filenamePattern": "[{recording_time}] {channel_name} {safe_live_title} {record_quality}{frame_rate}{file_extension}",
-    "postProcessingMethod": "스트림복사",
-    "moveAfterProcessingEnabled": False,
-    "moveAfterProcessing": "",
-    "postProcessingOutputDir": "", 
-    "videoCodec": "x264(CPU)",
-    "qualityOrBitrate": "퀄리티",
-    "videoQuality": None,
-    "videoBitrate": "",
-    "preset": "medium",
-    "audioCodec": "aac",
-    "audioBitrate": "128kbps",
-    "plugin": "기본 플러그인", 
-    "time_shift": 600,  
-    "autoStopInterval": 0
-}
 
 def load_config():
-    config_path = 'config.json'
-    if not os.path.exists(config_path):
-        with open(config_path, 'w') as config_file:
-            json.dump(default_config, config_file, indent=4)
-    with open(config_path, 'r') as config_file:
-        return json.load(config_file)
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'json', 'config.json')
+    default_config = {  # 기본 설정 값
+        "auto_record_mode": False,
+        "chat_auto_start": False,
+        "recheckInterval": 60,
+        "autoStopInterval": 0,
+        "showMessageBox": True,
+        "autoPostProcessing": False,
+        "filenamePattern": "[{recording_time}] {channel_name} {safe_live_title}{file_extension}",
+        "deleteAfterPostProcessing": False,
+        "postProcessingOutputDir": "",
+        "plugin": "기본",
+        "time_shift": "00:01:00",
+        "moveAfterProcessingEnabled": False,
+        "moveAfterProcessing": "",
+        "postProcessingMethod": "스트림복사",
+        "videoCodec": "x264(CPU)",
+        "videoBitrate": "8000",
+        "audioCodec": "aac",
+        "audioBitrate": "192k",
+        "preset": "veryfast",
+        "qualityOrBitrate":"퀄리티",
+        "videoQuality": "25",
+        "removeFixedPrefix": False,
+        "minimizePostProcessing": False
+    }
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        config = default_config.copy()  # 기본 설정 복사
+        save_config(config)  # 기본 설정으로 파일 생성
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON from config.json: {e}")
+        config = default_config.copy()  # JSON 파싱 오류 시 기본값 사용
+    
+    # 기본 설정에 없는 키가 있으면 추가 (업데이트 시 누락된 설정 방지)
+    for key, value in default_config.items():
+        if key not in config:
+            config[key] = value
+
+    return config
 
 def save_config(config):
-    config_path = 'config.json'
-    with open(config_path, 'w') as config_file:
-        json.dump(config, config_file, indent=4)
-
-
-# 설정 저장 함수
-def save_config(config):
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=4)
-
-# 설정 로드 함수
-def load_config():
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                save_config(config)
-                return config
-        except json.JSONDecodeError:
-            save_config(default_config)
-            return default_config
-    else:
-        save_config(default_config)
-        return default_config
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'json', 'config.json')
+    try:
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)  # 들여쓰기, 유니코드 설정
+    except Exception as e:
+         print(f"Error saving config: {e}")

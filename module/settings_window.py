@@ -6,6 +6,8 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from channel_manager import save_config, load_config
 from naver_login import NaverLoginService
+from path_config import base_directory  # base_directory를 임포트합니다.
+
 
 # 각 비디오 코덱에 대한 프리셋 목록
 codec_presets = {
@@ -47,7 +49,9 @@ class SettingsWindow(QMainWindow):
         # config.json 및 cookie.json 파일 경로 설정
         self.cookie_data = {}
         self.config_path = os.path.join(self.script_dir, 'config.json')
-        self.cookie_path = os.path.join(os.path.dirname(self.script_dir), 'json', 'cookie.json')
+
+        # base_directory를 사용하여 cookie_path를 설정합니다.
+        self.cookie_path = os.path.join(base_directory, 'json', 'cookie.json')
 
         # 설정 로드 및 UI 초기화
         self.config = load_config()  # config.json 로드
